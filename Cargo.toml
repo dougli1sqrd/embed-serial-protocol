@@ -1,0 +1,11 @@
+[package]
+name = "embed-serial-protocol"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bilge = "0.2.0"
+crc = "3.3.0"
+embedded-io = "0.6.1"
+heapless = "0.9.1"
+slippers = "0.1.4"
