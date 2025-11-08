@@ -18,8 +18,9 @@ impl<Rx: Read> BufferedRx<Rx> {
     }
 
     /// Load as much as we can from rx into the internal buf. Like flush from Write
-    pub fn buffer(&mut self) {
-        while let Ok(c) = self.rx.read() {
+    pub fn buffer(&mut self) -> nb::Result<(), Rx::Error> {
+        loop {
+            let c = self.rx.read()?;
             self.buf.push_back(c);
         }
     }

@@ -1,7 +1,7 @@
 extern crate alloc;
 
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 use crc::Crc;
 use embedded_hal_nb::serial::{ErrorType, Read, Write};
 use embedded_io::Write as IoWrite;
@@ -41,7 +41,10 @@ pub type FrameDataSlice<'a> = &'a [u8];
 #[derive(Debug)]
 pub enum FrameError {
     MissingStartDelim,
-    MissingEndDelim { index: usize, found: u8 },
+    MissingEndDelim {
+        index: usize,
+        found: u8,
+    },
     EncodeBufferTooSmall {
         expected: usize,
         found: usize,
@@ -144,7 +147,10 @@ impl<'a> Decode<'_> for Frame {
 
         // Check end delimiter
         if data[size + 3] != DELIMITER {
-            return Err(FrameError::MissingEndDelim { index: size + 3, found: data[size+3] });
+            return Err(FrameError::MissingEndDelim {
+                index: size + 3,
+                found: data[size + 3],
+            });
         }
 
         Ok(Frame {
@@ -187,6 +193,20 @@ impl<Tx: Write, Rx: Read> FrameTxRx<Tx, Rx> {
         }
     }
 
+    /// Read as much as we can out of the underlying Read until
+    /// we WouldBlock or Error
+    /// TODO no accounting for just a flood of input on Rx and
+    /// we end up blocking by accident anyway.
+    pub fn buffer_rx(&mut self) -> nb::Result<(), Rx::Error> {
+        self.rx.buffer()
+    }
+
+    /// Flush everything buffered in the underlying Write until
+    /// it's empty or we WouldBlock or Error
+    pub fn flush_tx(&mut self) -> nb::Result<(), Tx::Error> {
+        embedded_hal_nb::serial::Write::flush(&mut self.tx)
+    }
+
     pub fn send(&mut self, data: &[u8]) -> Result<(), FrameIOError<Tx::Error, Rx::Error>> {
         // We can send the whole encoded frame into Tx. Tx is Buffered so
         // Even if it doesn't all go down the wire right away it'll at least
@@ -201,8 +221,16 @@ impl<Tx: Write, Rx: Read> FrameTxRx<Tx, Rx> {
 
     pub fn recv(&mut self) -> nb::Result<Frame, FrameIOError<Tx::Error, Rx::Error>> {
         // Throw away any garbage that isn't the Delimiter
-        // If rx.read() WouldBlock, then the buffer is empty and we WouldBlock also
-        self.rx.buffer();
+        // If rx.read() WouldBlock, then the buffer is empty and we just continue onward
+        // If there's an error than bail, since we the underlying Read failed somehow
+        if let Err(nb::Error::Other(e)) = self.rx.buffer().map_err(|e| match e {
+            nb::Error::WouldBlock => nb::Error::WouldBlock,
+            nb::Error::Other(ee) => {
+                nb::Error::Other(FrameIOError::<Tx::Error, Rx::Error>::Read(ee))
+            }
+        }) {
+            return Err(nb::Error::Other(e));
+        }
         loop {
             if let Some(DELIMITER) = self.rx.peek() {
                 break;
@@ -225,11 +253,10 @@ impl<Tx: Write, Rx: Read> FrameTxRx<Tx, Rx> {
             let f = Frame::decode(buf).map_err(FrameIOError::from)?;
             // Deque all the elements in the slice we just made into a Frame
             self.rx.drain(f.len());
-            return Ok(f)
+            return Ok(f);
         } else {
             return Err(nb::Error::WouldBlock);
         }
-        
     }
 
     pub fn split(self) -> (BufferedTx<Tx>, BufferedRx<Rx>) {
