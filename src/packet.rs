@@ -1,5 +1,7 @@
 extern crate alloc;
 
+use core::convert::Infallible;
+
 use alloc::string::String;
 use alloc::vec::Vec;
 use crc::Crc;
@@ -261,5 +263,63 @@ impl<Tx: Write, Rx: Read> FrameTxRx<Tx, Rx> {
 
     pub fn split(self) -> (BufferedTx<Tx>, BufferedRx<Rx>) {
         (self.tx, self.rx)
+    }
+}
+
+pub struct FrameRx<Rx: Read> {
+    rx: BufferedRx<Rx>,
+}
+
+impl<Rx: Read> FrameRx<Rx> {
+    pub fn new(rx: Rx) -> FrameRx<Rx> {
+        FrameRx { rx: BufferedRx::new(rx) }
+    }
+
+    /// Read as much as we can out of the underlying Read until
+    /// we WouldBlock or Error
+    /// TODO no accounting for just a flood of input on Rx and
+    /// we end up blocking by accident anyway.
+    pub fn buffer_rx(&mut self) -> nb::Result<(), Rx::Error> {
+        self.rx.buffer()
+    }
+
+    pub fn recv(&mut self) -> nb::Result<Frame, FrameIOError<Infallible, Rx::Error>> {
+        // Throw away any garbage that isn't the Delimiter
+        // If rx.read() WouldBlock, then the buffer is empty and we just continue onward
+        // If there's an error than bail, since we the underlying Read failed somehow
+        if let Err(nb::Error::Other(e)) = self.rx.buffer().map_err(|e| match e {
+            nb::Error::WouldBlock => nb::Error::WouldBlock,
+            nb::Error::Other(ee) => {
+                nb::Error::Other(FrameIOError::<Infallible, Rx::Error>::Read(ee))
+            }
+        }) {
+            return Err(nb::Error::Other(e));
+        }
+        loop {
+            if let Some(DELIMITER) = self.rx.peek() {
+                break;
+            }
+            // If we block or error, then return
+            if let Err(e) = self.rx.read() {
+                match e {
+                    nb::Error::WouldBlock => return Err(nb::Error::WouldBlock),
+                    nb::Error::Other(ee) => return Err(nb::Error::Other(FrameIOError::Read(ee))),
+                }
+            }
+        }
+        // We need to check if the underlying Rx buffer contains a frame
+        // We'll only return if we have a potential Frame to decode
+        let x = self.rx.front_back_find(DELIMITER);
+        // return Err(nb::Error::Other(FrameIOError::Frame(FrameError::Debug(alloc::format!("{:?}", x)))));
+        if x.is_some() {
+            // We've found two different DELIMITERs, so try to make a frame
+            let buf = self.rx.slice();
+            let f = Frame::decode(buf).map_err(FrameIOError::from)?;
+            // Deque all the elements in the slice we just made into a Frame
+            self.rx.drain(f.len());
+            return Ok(f);
+        } else {
+            return Err(nb::Error::WouldBlock);
+        }
     }
 }
