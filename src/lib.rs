@@ -3,6 +3,10 @@
 pub mod packet;
 pub mod serial;
 
+extern crate alloc;
+
+pub use embedded_io as io;
+
 pub trait Encode {
     type Error;
 

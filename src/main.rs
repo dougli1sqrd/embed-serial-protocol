@@ -1,34 +1,10 @@
 use std::{collections::VecDeque, convert::Infallible};
 
-use embed_serial_protocol::{Decode, Encode, Frame, FrameTxRx, MAX_FRAME_SIZE};
+use embed_serial_protocol::{Decode, Encode, Frame, FrameTxRx, MAX_FRAME_SIZE, packet::FrameRx};
 use embedded_hal_nb::serial::{ErrorType, Read, Write};
 
 fn main() {
-    // println!("Hello");
-    // let mut test_write = TxBuffer::new();
-    // // let data = [4, 9, 9, 9, 4, 8, 8, 8];
-    let data = "ASCII is the standardisation of a seven-bit teleprinter code".as_bytes();
-    let mut buf = [0; MAX_FRAME_SIZE];
-    let r = data.encode(&mut buf);
-    println!("{:?}", r);
-    println!("buf = {:?}", buf);
-    let f = Frame::decode(&buf);
-    println!("{:?}", f);
 
-    let rx = ReadBuffer(VecDeque::from(buf));
-    println!("Rx Source: {:?}", rx);
-    let tx = TxBuffer::new();
-    let mut frame_txrx = FrameTxRx::new(tx, rx);
-    let rec = frame_txrx.recv();
-    println!("Receiving!");
-    println!("{:?}", rec);
-    println!("Sending!");
-    let send = frame_txrx.send("hello world".as_bytes());
-    println!("sent: {:?}", send);
-    let (tx, rx) = frame_txrx.split();
-    println!("{:?}", tx);
-    println!("{:?}", rx.buf.as_slices());
-    
 }
 
 #[derive(Debug)]

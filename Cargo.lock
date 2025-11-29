@@ -60,13 +60,14 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
 name = "embed-serial-protocol"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "bilge",
  "crc",
  "embedded-hal-nb",
  "embedded-io",
  "heapless",
+ "log",
  "nb",
  "slippers",
 ]
@@ -120,6 +121,12 @@ checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
 dependencies = [
  "either",
 ]
+
+[[package]]
+name = "log"
+version = "0.4.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 
 [[package]]
 name = "nb"

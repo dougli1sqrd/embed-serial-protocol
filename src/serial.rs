@@ -1,6 +1,8 @@
 extern crate alloc;
 
-use alloc::collections::VecDeque;
+use core::convert::Infallible;
+
+use alloc::{collections::VecDeque, vec::Vec};
 use embedded_hal_nb::serial::{Error, ErrorType, Read, Write};
 
 #[derive(Debug)]
@@ -20,34 +22,30 @@ impl<Rx: Read> BufferedRx<Rx> {
     /// Load as much as we can from rx into the internal buf. Like flush from Write
     pub fn buffer(&mut self) -> nb::Result<(), Rx::Error> {
         loop {
-            let c = self.rx.read()?;
-            self.buf.push_back(c);
+            match self.rx.read() {
+                Ok(k) => {
+                    self.buf.push_back(k);
+                }
+                Err(e) => match e {
+                    nb::Error::WouldBlock => {
+                        break;
+                    }
+                    nb::Error::Other(ee) => return Err(nb::Error::Other(ee)),
+                },
+            }
         }
+        let _ = self.buf.make_contiguous();
+        Ok(())
     }
 
     pub fn peek(&self) -> Option<u8> {
         self.buf.front().copied()
     }
 
-    /// Removes elements from the front of the VecDeque from 0 to the 
+    /// Removes elements from the front of the VecDeque from 0 to the
     /// specified amount.
     pub fn drain(&mut self, amount: usize) -> alloc::collections::vec_deque::Drain<'_, u8> {
         self.buf.drain(0..amount)
-    }
-
-    pub fn front_back_find(&self, c: u8) -> Option<(usize, usize)> {
-        // Find from the front
-        let sl = self.slice();
-        let x = sl.iter().enumerate().find(|(_, x)| **x == c);
-        // Find from the back
-        if let Some((p, _)) = x {
-            let y = sl.iter().rev().enumerate().find(|(_, x)| **x == c);
-            if let Some((q, _)) = y {
-                let q = sl.len() - 1 - q;
-                return if p != q { Some((p, q)) } else { None }
-            }
-        }
-        None
     }
 
     pub fn slice(&self) -> &[u8] {
@@ -80,6 +78,22 @@ impl<Rx: Read> Read for BufferedRx<Rx> {
         self.buf.pop_front().ok_or(nb::Error::WouldBlock)
     }
 }
+
+impl<Rx: Read> ReadAmt for BufferedRx<Rx> {
+    type Error = Infallible;
+
+    /// Attempt to read the amount requested
+    /// If there's not enough data in the queue then it WouldBlock
+    fn read_amt(&mut self, amount: usize) -> nb::Result<Vec<u8>, Infallible> {
+        // If we're asking for too much data, then WouldBlock
+        if amount > self.buf.len() {
+            return Err(nb::Error::WouldBlock);
+        }
+        Ok(self.drain(amount).collect())
+    }
+}
+
+
 
 #[derive(Debug)]
 pub struct BufferedTx<Tx: Write> {
@@ -144,9 +158,20 @@ impl<Tx: Write> Write for BufferedTx<Tx> {
     fn flush(&mut self) -> nb::Result<(), Self::Error> {
         loop {
             // Pop, and if we're empty then flush WouldBlock
-            let x = self.buf.pop_front().ok_or(nb::Error::WouldBlock)?;
+            let x = if let Some(x) = self.buf.pop_front() {
+                x
+            } else {
+                return Ok(())
+            };
             // Attempt to write, and we'll drop out if write WouldBlock or Err
-            self.tx.write(x)?;
+            if let Err(e) = self.tx.write(x) {
+                // If writing got an error than we need to push the byte back into the buffer
+                // Since other parts of the code assume buf is contiguous let's make it
+                // contiguous here (since pushing front is non-contiguous)
+                self.buf.push_front(x);
+                self.buf.make_contiguous();
+                break Err(e)
+            }
         }
     }
 }
@@ -170,5 +195,36 @@ impl<Tx: Write> embedded_io::Write for BufferedTx<Tx> {
                 nb::Error::WouldBlock => Ok(()),
             },
         }
+    }
+}
+
+pub trait ReadAmt {
+    type Error;
+
+    fn read_amt(&mut self, amount: usize) -> nb::Result<Vec<u8>, Self::Error>;
+}
+
+#[derive(Debug)]
+pub struct BufferedRxTx<Rx: Read, Tx: Write> {
+    pub rx: BufferedRx<Rx>,
+    pub tx: BufferedTx<Tx>,
+}
+
+impl<Rx: Read, Tx: Write> BufferedRxTx<Rx, Tx> {
+    pub fn new(rx: Rx, tx: Tx) -> BufferedRxTx<Rx, Tx> {
+        BufferedRxTx {
+            rx: BufferedRx::new(rx),
+            tx: BufferedTx::new(tx),
+        }
+    }
+}
+
+impl<Rx: Read, Tx: Write> ReadAmt for BufferedRxTx<Rx, Tx> {
+    type Error = Infallible;
+    /// Attempt to read the amount requested
+    /// If there's not enough data in the queue then it WouldBlock
+    fn read_amt(&mut self, amount: usize) -> nb::Result<Vec<u8>, Infallible> {
+        // If we're asking for too much data, then WouldBlock
+        self.rx.read_amt(amount)
     }
 }
