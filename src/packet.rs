@@ -182,7 +182,7 @@ impl<'a> Decode<'_> for Frame {
     }
 }
 
-pub fn recv_frame<Rx: Read, Tx: Write>(rx: &mut BufferedRx<Rx>) -> nb::Result<Frame, FrameError> {
+pub fn recv_frame<Rx: Read>(rx: &mut BufferedRx<Rx>) -> nb::Result<Frame, FrameError> {
     // Cycle through bytes until we get to the delimiter
     let sl = rx.slice();
     let delim = sl.iter().enumerate().find(|(_, x)| **x == DELIMITER);
